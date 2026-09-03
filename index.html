@@ -208,20 +208,6 @@
   }
   .helper b{ color:var(--ink); font-weight:600; }
 
-  .copied-flag{
-    display:inline-flex;
-    align-items:center;
-    gap:6px;
-    font-size:12px;
-    color:var(--plum-deep);
-    font-weight:600;
-    opacity:0;
-    transition:opacity .25s ease;
-    justify-content:center;
-    margin-top:2px;
-  }
-  .copied-flag.show{ opacity:1; }
-
   .private-note{
     font-size:14px;
     line-height:1.6;
@@ -237,12 +223,6 @@
     font-size:10.5px;
     letter-spacing:.08em;
     color:#BBA98E;
-  }
-
-  .error-note{
-    font-size:12.5px;
-    color:#8A4A4A;
-    text-align:center;
   }
 
   /* Services */
@@ -285,18 +265,6 @@
     transition:border-color .15s ease, background .15s ease;
   }
   .choice-card:hover{ border-color:var(--gold); }
-  .choice-card.chosen{
-    border-color:var(--gold);
-    background:#FBF3E3;
-  }
-  .choice-tag{
-    display:block;
-    font-size:11px;
-    color:var(--gold);
-    font-weight:600;
-    letter-spacing:.03em;
-    margin-bottom:6px;
-  }
 </style>
 </head>
 <body>
@@ -323,12 +291,12 @@
   <!-- Stage: loading -->
   <div class="stage" id="stageLoading">
     <div class="loading">
-      <span id="loadingText">Writing something for you</span>
+      <span>Writing something for you</span>
       <span class="loading-dots"><span></span><span></span><span></span></span>
     </div>
   </div>
 
-  <!-- Stage: pick from generated reviews -->
+  <!-- Stage: pick from reviews -->
   <div class="stage" id="stageChoices">
     <p class="helper" style="margin-bottom:2px;">Tap the one that sounds most like you.</p>
     <div id="choiceList" style="display:flex;flex-direction:column;gap:10px;"></div>
@@ -357,15 +325,6 @@
     <p class="helper">This goes straight to the team — it won't be posted publicly.</p>
   </div>
 
-  <div class="stage" id="stageError">
-    <p class="error-note">Couldn't reach our review assistant — you can still write your own below.</p>
-    <div class="panel">
-      <p class="panel-label">Your review</p>
-      <textarea id="reviewTextFallback" placeholder="Tell us about your visit…"></textarea>
-    </div>
-    <button class="btn btn-primary" id="continueGoogleFallback">Continue to Google</button>
-  </div>
-
   <div class="footer">POWERED BY CURRIO DESIGNS</div>
 </div>
 
@@ -374,14 +333,70 @@ const PLACE_ID = "ChIJp8S_itJnXj4RTiAH4zJmoOo";
 const SALON_WHATSAPP = "971507810423";
 const GOOGLE_REVIEW_URL = `https://search.google.com/local/writereview?placeid=${PLACE_ID}`;
 
+// Fixed service list, and the phrase used when weaving a service into a sentence.
 const SERVICES = [
-  "Hair Styling & Cut",
-  "Nail Art & Manicure",
-  "Henna / Mehndi",
-  "Facial & Skincare",
-  "Bridal Makeup & Draping",
-  "Threading & Waxing"
+  { label: "Hair Styling & Cut", phrase: "hair styling" },
+  { label: "Nail Art & Manicure", phrase: "nail art" },
+  { label: "Henna / Mehndi", phrase: "henna" },
+  { label: "Facial & Skincare", phrase: "a facial" },
+  { label: "Bridal Makeup & Draping", phrase: "bridal makeup" },
+  { label: "Threading & Waxing", phrase: "threading" },
 ];
+
+// 4 fixed, short reviews per single service — kept casual and plain, the way people actually write on Google.
+const REVIEWS_BY_SERVICE = {
+  "Hair Styling & Cut": [
+    "Got a haircut here, really happy with it. Stylist listened to what I wanted and didn't rush.",
+    "Good experience, my hair turned out exactly how I asked for it.",
+    "Been coming here for haircuts for a while now, always consistent.",
+    "Quick appointment, no wait, haircut came out great."
+  ],
+  "Nail Art & Manicure": [
+    "Did my nails here before a wedding, they looked great and lasted a long time.",
+    "Good manicure, clean work, staff was friendly.",
+    "Got some nail art done, exactly what I asked for.",
+    "Simple manicure but done really well, no complaints."
+  ],
+  "Henna / Mehndi": [
+    "Got mehndi done for a function, design was beautiful and came out really dark.",
+    "Really happy with the henna, the artist was patient with the design.",
+    "Booked mehndi last minute and they still did a great job.",
+    "Nice henna design, lasted almost 2 weeks."
+  ],
+  "Facial & Skincare": [
+    "Did a facial here, my skin felt so much better after.",
+    "Relaxing facial, no pressure to buy anything extra.",
+    "Skin looked visibly better after, would recommend.",
+    "Good facial, calm place, will be back."
+  ],
+  "Bridal Makeup & Draping": [
+    "Kajal did my bridal makeup and draping, everything stayed perfect the whole day.",
+    "Great bridal package, makeup lasted through the entire event.",
+    "They made my wedding day so much easier, makeup and draping both came out perfect.",
+    "Really happy with how my bridal look turned out, professional team."
+  ],
+  "Threading & Waxing": [
+    "Quick threading, clean and no irritation after.",
+    "Been coming here for threading for months, always precise.",
+    "Tried waxing here, less painful than expected, good service.",
+    "Reliable threading every time, never rushed."
+  ],
+};
+
+// 4 fixed templates used when more than one service is picked.
+// {services} gets replaced with a natural joined phrase, e.g. "hair styling and nail art".
+const COMBO_TEMPLATES = [
+  "Came in for {services}, really happy with everything.",
+  "Got {services} done in one visit, all turned out great.",
+  "Booked {services} together, smooth experience overall.",
+  "Went in for {services}, team did a great job with all of it."
+];
+
+function joinPhrases(phrases){
+  if (phrases.length === 1) return phrases[0];
+  if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
+  return `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
+}
 
 const starRow = document.getElementById('starRow');
 const starLabel = document.getElementById('starLabel');
@@ -392,7 +407,6 @@ const stages = {
   choices: document.getElementById('stageChoices'),
   public: document.getElementById('stagePublic'),
   private: document.getElementById('stagePrivate'),
-  error: document.getElementById('stageError'),
 };
 
 const labels = ["", "Not great", "Could be better", "It was okay", "Really good", "Loved it"];
@@ -444,21 +458,21 @@ function buildServiceGrid(){
   selectedServices = [];
   const grid = document.getElementById('serviceGrid');
   grid.innerHTML = '';
-  SERVICES.forEach(name => {
+  SERVICES.forEach(({label}) => {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'service-chip';
-    chip.textContent = name;
-    chip.addEventListener('click', () => toggleService(name, chip));
+    chip.textContent = label;
+    chip.addEventListener('click', () => toggleService(label, chip));
     grid.appendChild(chip);
   });
   document.getElementById('servicesContinue').disabled = true;
 }
 
-function toggleService(name, chip){
-  const idx = selectedServices.indexOf(name);
+function toggleService(label, chip){
+  const idx = selectedServices.indexOf(label);
   if (idx === -1){
-    selectedServices.push(name);
+    selectedServices.push(label);
     chip.classList.add('selected');
   } else {
     selectedServices.splice(idx, 1);
@@ -467,29 +481,37 @@ function toggleService(name, chip){
   document.getElementById('servicesContinue').disabled = selectedServices.length === 0;
 }
 
-document.getElementById('servicesContinue').addEventListener('click', async () => {
-  promptText.textContent = "One moment…";
-  document.getElementById('loadingText').textContent = "Drafting a few options";
+document.getElementById('servicesContinue').addEventListener('click', () => {
   showStage('loading');
-  try {
-    generatedOptions = await generateReviewOptions(selectedStars, selectedServices);
+  // Brief pause purely for a natural feel — these are fixed, no network call.
+  setTimeout(() => {
+    generatedOptions = buildReviewOptions(selectedServices);
     renderChoices();
     showStage('choices');
-  } catch (err){
-    showStage('error');
-  }
+  }, 500);
 });
+
+function buildReviewOptions(services){
+  if (services.length === 1){
+    return REVIEWS_BY_SERVICE[services[0]];
+  }
+  const phrases = services.map(label => SERVICES.find(s => s.label === label).phrase);
+  const joined = joinPhrases(phrases);
+  return COMBO_TEMPLATES.map(t => t.replace("{services}", joined));
+}
 
 function renderChoices(){
   const list = document.getElementById('choiceList');
   list.innerHTML = '';
-  generatedOptions.forEach((text, i) => {
+  generatedOptions.forEach((text) => {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'choice-card';
-    card.innerHTML = `<span class="choice-tag">Option ${i + 1}</span>${text}`;
+    card.textContent = text;
     card.addEventListener('click', () => {
       document.getElementById('reviewText').value = text;
+      document.getElementById('copyHelper').innerHTML = 'Tap <b>Copy review</b> first, then open Google and paste it in.';
+      document.getElementById('continueGoogle').disabled = true;
       showStage('public');
     });
     list.appendChild(card);
@@ -500,45 +522,16 @@ document.getElementById('backToChoices').addEventListener('click', () => {
   showStage('choices');
 });
 
-async function generateReviewOptions(stars, services){
-  const serviceList = services.join(", ");
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 500,
-      messages: [{
-        role: "user",
-        content: `Write 3 distinct, natural-sounding Google reviews (2-3 sentences each, first person, no quotation marks) for a ladies-only beauty salon called "Kusum Ladies Beauty Centre" in Abu Dhabi. The customer is giving a ${stars}-star rating and had these services done: ${serviceList}. Each of the 3 reviews should have a different tone (e.g. warm and personal, brief and enthusiastic, detail-focused) and reference the services naturally without sounding like a list. Avoid generic phrases like "amazing service" as the only content. Respond with ONLY a JSON array of exactly 3 strings, nothing else — no markdown fences, no preamble.`
-      }]
-    })
-  });
-  const data = await response.json();
-  const textBlock = data.content.find(b => b.type === "text");
-  if (!textBlock || !textBlock.text) throw new Error("No text returned");
-  let raw = textBlock.text.trim();
-  raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '');
-  const arr = JSON.parse(raw);
-  if (!Array.isArray(arr) || arr.length === 0) throw new Error("Bad format");
-  return arr;
-}
-
 async function copyText(text, textareaEl){
-  // Try the modern async clipboard API first.
   try {
     await navigator.clipboard.writeText(text);
     return true;
   } catch (e){ /* fall through to legacy method */ }
-
-  // Fallback for browsers/webviews that block navigator.clipboard
-  // (common inside sandboxed previews and some in-app browsers).
   try {
     textareaEl.focus();
     textareaEl.select();
     textareaEl.setSelectionRange(0, text.length);
-    const ok = document.execCommand('copy');
-    return ok;
+    return document.execCommand('copy');
   } catch (e){
     return false;
   }
@@ -551,20 +544,13 @@ document.getElementById('copyBtn').addEventListener('click', async () => {
   const openBtn = document.getElementById('continueGoogle');
   if (ok){
     helper.innerHTML = "<b>Copied.</b> Now tap below to open Google and paste it in.";
-    openBtn.disabled = false;
   } else {
     helper.innerHTML = "Couldn't copy automatically — the text above is <b>selected</b>, use your keyboard's copy option, then open Google.";
-    openBtn.disabled = false;
   }
+  openBtn.disabled = false;
 });
 
 document.getElementById('continueGoogle').addEventListener('click', () => {
-  window.open(GOOGLE_REVIEW_URL, '_blank');
-});
-
-document.getElementById('continueGoogleFallback').addEventListener('click', async () => {
-  const ta = document.getElementById('reviewTextFallback');
-  await copyText(ta.value, ta);
   window.open(GOOGLE_REVIEW_URL, '_blank');
 });
 
